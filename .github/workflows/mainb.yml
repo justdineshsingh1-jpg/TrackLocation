@@ -25,18 +25,19 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Install NPM Dependencies
-        run: npm install
-
-      - name: Build Web App
-        run: npm run build
-
-      - name: Sync Capacitor
-        run: npx cap sync android
-
-      - name: Build Android Debug APK
-        working-directory: ./android
+      - name: Build Everything
         run: |
+          # Automatically find the frontend folder
+          PROJECT_DIR=$(dirname $(find . -name "capacitor.config.json" | head -n 1))
+          cd $PROJECT_DIR
+          
+          # Install and build web app
+          npm install
+          npm run build
+          npx cap sync android
+          
+          # Build Android APK
+          cd android
           chmod +x ./gradlew
           ./gradlew assembleDebug
 
@@ -44,4 +45,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: DeliveryTrackerApp
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: '**/android/app/build/outputs/apk/debug/app-debug.apk'
