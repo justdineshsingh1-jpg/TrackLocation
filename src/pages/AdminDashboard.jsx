@@ -222,14 +222,14 @@ export default function AdminDashboard() {
           <LayersControl position="topright">
             <LayersControl.BaseLayer checked name="Google Streets">
               <TileLayer
-                url="http://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
+                url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
                 maxZoom={20}
                 attribution="Google"
               />
             </LayersControl.BaseLayer>
             <LayersControl.BaseLayer name="Google Hybrid">
               <TileLayer
-                url="http://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+                url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
                 maxZoom={20}
                 attribution="Google"
               />

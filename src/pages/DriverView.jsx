@@ -158,10 +158,26 @@ export default function DriverView() {
       }
     };
 
-    // Sync interval: 4-5 minutes as requested (240000 ms)
-    const interval = setInterval(syncData, 240000);
+    // Sync interval: 4 minutes as requested (240000 ms)
+    const interval = setInterval(() => {
+      if (syncQueue.length > 0) syncData();
+    }, 240000);
     return () => clearInterval(interval);
   }, [syncQueue, isOnline]);
+
+  // Expose manual sync function for Clock Out
+  const forceSync = async () => {
+    if (syncQueue.length === 0 || !isOnline) return;
+    setStatus(`Syncing (${syncQueue.length} pending)...`);
+    try {
+      await logPoints(syncQueue);
+      setSyncQueue([]);
+      setStatus('Tracking Active');
+    } catch (error) {
+      console.error("Sync failed", error);
+      setStatus('Sync Failed - Will retry');
+    }
+  };
 
   if (!driverName) {
     return (
@@ -213,14 +229,14 @@ export default function DriverView() {
         <LayersControl position="topright">
           <LayersControl.BaseLayer checked name="Google Streets">
             <TileLayer
-              url="http://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
+              url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
               maxZoom={20}
               attribution="Google"
             />
           </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="Google Hybrid">
             <TileLayer
-              url="http://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+              url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
               maxZoom={20}
               attribution="Google"
             />
@@ -264,13 +280,21 @@ export default function DriverView() {
       
       {/* Clock In / Clock Out Floating Button */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-[1000] w-11/12 max-w-sm">
+        {syncQueue.length > 0 && (
+          <div className="bg-white/90 backdrop-blur text-xs font-bold text-slate-600 text-center py-2 rounded-t-xl mb-1 shadow-sm">
+            {syncQueue.length} points waiting to sync...
+          </div>
+        )}
         {isTracking ? (
           <button 
-            onClick={() => setIsTracking(false)}
+            onClick={() => {
+              setIsTracking(false);
+              forceSync(); // Sync immediately when they clock out!
+            }}
             className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-xl shadow-2xl transition-transform active:scale-95 text-lg flex items-center justify-center gap-2 border-2 border-white/20"
           >
             <span className="w-3 h-3 rounded-full bg-white animate-pulse" />
-            Clock Out (Stop Tracking)
+            Clock Out & Sync Now
           </button>
         ) : (
           <button 
