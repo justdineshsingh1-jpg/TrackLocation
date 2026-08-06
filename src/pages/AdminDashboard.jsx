@@ -16,6 +16,77 @@ const MapBounds = ({ bounds }) => {
   return null;
 };
 
+// Custom component to snap GPS points to roads using OSRM Match API
+const SnappedPolyline = ({ pts, color, bounds, popupContent, weight = 4, opacity = 0.8 }) => {
+  const [geometries, setGeometries] = useState(null);
+
+  useEffect(() => {
+    if (!pts || pts.length < 2) return;
+    
+    // Chunk array into pieces of max 90 points (OSRM limit is 100)
+    const chunks = [];
+    for (let i = 0; i < pts.length; i += 90) {
+      chunks.push(pts.slice(i, i + 91)); // Overlap by 1 to connect chunks
+    }
+
+    const fetchSnaps = async () => {
+      try {
+        const results = await Promise.all(chunks.map(async chunk => {
+          if (chunk.length < 2) return null;
+          const coords = chunk.map(p => `${p.lng},${p.lat}`).join(';');
+          // Use OSRM public API for map matching
+          const url = `https://router.project-osrm.org/match/v1/driving/${coords}?geometries=geojson&overview=full`;
+          const res = await fetch(url);
+          const data = await res.json();
+          
+          if (data.code === 'Ok' && data.matchings && data.matchings.length > 0) {
+            const combinedCoords = [];
+            data.matchings.forEach(m => {
+              if (m.geometry && m.geometry.coordinates) {
+                // GeoJSON is [lng, lat], Leaflet is [lat, lng]
+                m.geometry.coordinates.forEach(c => combinedCoords.push([c[1], c[0]]));
+              }
+            });
+            return combinedCoords;
+          } else {
+            console.warn("OSRM Match failed for chunk:", data.code);
+            return null; // fallback to straight lines for this chunk
+          }
+        }));
+        
+        let finalPath = [];
+        results.forEach((res, i) => {
+          if (res) {
+            finalPath = finalPath.concat(res);
+          } else {
+            finalPath = finalPath.concat(chunks[i].map(p => [p.lat, p.lng]));
+          }
+        });
+        setGeometries(finalPath);
+      } catch (e) {
+        console.error("OSRM Error:", e);
+        setGeometries(null);
+      }
+    };
+    
+    fetchSnaps();
+  }, [pts]);
+
+  const rawLatLngs = pts.map(p => {
+    if (bounds) bounds.extend([p.lat, p.lng]);
+    return [p.lat, p.lng];
+  });
+
+  const displayPath = geometries || rawLatLngs;
+
+  return (
+    <Polyline positions={displayPath} color={color} weight={weight} opacity={opacity}>
+      {popupContent && <Popup>{popupContent}</Popup>}
+    </Polyline>
+  );
+};
+
+
 export default function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem('adminAuth') === 'true';
@@ -245,9 +316,9 @@ export default function AdminDashboard() {
 
           {/* Render History Paths */}
           {Object.values(driversHistory).map((pts, i) => (
-            <Polyline 
+            <SnappedPolyline 
               key={`hist-${i}`} 
-              positions={pts.map(p => [p.lat, p.lng])} 
+              pts={pts}
               color="#cbd5e1" 
               weight={2} 
               opacity={0.5} 
@@ -265,8 +336,11 @@ export default function AdminDashboard() {
 
             return (
               <React.Fragment key={`today-${driverId}`}>
-                <Polyline positions={latLngs} color={color} weight={4} opacity={0.8}>
-                  <Popup>
+                <SnappedPolyline 
+                  pts={pts} 
+                  color={color} 
+                  bounds={bounds}
+                  popupContent={
                     <div className="font-semibold text-center text-sm text-slate-700">
                       Distance Travelled:<br/>
                       {(() => {
@@ -277,8 +351,8 @@ export default function AdminDashboard() {
                         return dist > 1000 ? (dist/1000).toFixed(2) + ' km' : Math.round(dist) + ' m';
                       })()}
                     </div>
-                  </Popup>
-                </Polyline>
+                  }
+                />
                 
                 {pts.map((p, pIdx) => {
                   let timeStr = new Date(p.timestamp).toLocaleTimeString();

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import DriverView from './pages/DriverView';
 import AdminDashboard from './pages/AdminDashboard';
 import { MapPin, LayoutDashboard } from 'lucide-react';
@@ -39,13 +39,13 @@ function Landing() {
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/driver" element={<DriverView />} />
         <Route path="/admin" element={<AdminDashboard />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 

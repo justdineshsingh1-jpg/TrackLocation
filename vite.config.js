@@ -5,6 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: process.env.VITE_IS_GH_PAGES === 'true' ? '/TrackLocation/' : '/',
   plugins: [
     react(),
     tailwindcss(),
