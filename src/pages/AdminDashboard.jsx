@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap, LayersC
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { fetchPoints } from '../api';
-import { Calendar, Users, Activity, ChevronLeft } from 'lucide-react';
+import { Calendar, Users, Activity, ChevronLeft, Menu, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const MapBounds = ({ bounds }) => {
@@ -31,28 +31,41 @@ const SnappedPolyline = ({ pts, color, bounds, popupContent, weight = 4, opacity
 
     const fetchSnaps = async () => {
       try {
-        const results = await Promise.all(chunks.map(async chunk => {
-          if (chunk.length < 2) return null;
+        const results = [];
+        for (const chunk of chunks) {
+          if (chunk.length < 2) {
+            results.push(null);
+            continue;
+          }
           const coords = chunk.map(p => `${p.lng},${p.lat}`).join(';');
           // Use OSRM public API for map matching
           const url = `https://router.project-osrm.org/match/v1/driving/${coords}?geometries=geojson&overview=full`;
-          const res = await fetch(url);
-          const data = await res.json();
           
-          if (data.code === 'Ok' && data.matchings && data.matchings.length > 0) {
-            const combinedCoords = [];
-            data.matchings.forEach(m => {
-              if (m.geometry && m.geometry.coordinates) {
-                // GeoJSON is [lng, lat], Leaflet is [lat, lng]
-                m.geometry.coordinates.forEach(c => combinedCoords.push([c[1], c[0]]));
-              }
-            });
-            return combinedCoords;
-          } else {
-            console.warn("OSRM Match failed for chunk:", data.code);
-            return null; // fallback to straight lines for this chunk
+          try {
+            const res = await fetch(url);
+            const data = await res.json();
+            
+            if (data.code === 'Ok' && data.matchings && data.matchings.length > 0) {
+              const combinedCoords = [];
+              data.matchings.forEach(m => {
+                if (m.geometry && m.geometry.coordinates) {
+                  // GeoJSON is [lng, lat], Leaflet is [lat, lng]
+                  m.geometry.coordinates.forEach(c => combinedCoords.push([c[1], c[0]]));
+                }
+              });
+              results.push(combinedCoords);
+            } else {
+              console.warn("OSRM Match failed for chunk:", data.code);
+              results.push(null); // fallback to straight lines for this chunk
+            }
+          } catch (err) {
+            console.error("OSRM chunk fetch failed", err);
+            results.push(null);
           }
-        }));
+          
+          // Wait 500ms before next OSRM request to avoid rate limit (HTTP 429 Too Many Requests)
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
         
         let finalPath = [];
         results.forEach((res, i) => {
@@ -88,6 +101,7 @@ const SnappedPolyline = ({ pts, color, bounds, popupContent, weight = 4, opacity
 
 
 export default function AdminDashboard() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem('adminAuth') === 'true';
   });
@@ -104,9 +118,8 @@ export default function AdminDashboard() {
     setLoading(true);
     setError(null);
     try {
-      // Fetch all points, the API can filter by date if passed, or we filter here.
-      // To show history in grey, we need all points.
-      const data = await fetchPoints();
+      // Fetch points for the selected date only to improve performance
+      const data = await fetchPoints(date);
       setPoints(data);
     } catch (err) {
       setError(err.message);
@@ -117,7 +130,6 @@ export default function AdminDashboard() {
 
   // Grouping Data
   const driversToday = {};
-  const driversHistory = {};
   
   points.forEach(p => {
     const lat = parseFloat(p.lat);
@@ -125,13 +137,8 @@ export default function AdminDashboard() {
     if (!lat || !lng) return;
 
     const pointData = { ...p, lat, lng };
-    if (p.date === date) {
-      if (!driversToday[p.driver]) driversToday[p.driver] = [];
-      driversToday[p.driver].push(pointData);
-    } else {
-      if (!driversHistory[p.driver]) driversHistory[p.driver] = [];
-      driversHistory[p.driver].push(pointData);
-    }
+    if (!driversToday[p.driver]) driversToday[p.driver] = [];
+    driversToday[p.driver].push(pointData);
   });
 
   const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
@@ -177,15 +184,30 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-100 font-sans">
+    <div className="flex h-screen bg-slate-100 font-sans overflow-hidden">
       
+      {/* Mobile Sidebar Overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-[1500] md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="w-80 bg-white border-r border-slate-200 flex flex-col shadow-lg z-10 hidden md:flex">
+      <div className={`
+        fixed inset-y-0 left-0 z-[2000] w-80 bg-white border-r border-slate-200 flex flex-col shadow-2xl transform transition-transform duration-300 ease-in-out
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        md:relative md:translate-x-0 md:flex md:shadow-lg md:z-10
+      `}>
         <div className="p-6 border-b border-slate-100 flex items-center gap-3">
           <Link to="/" className="p-2 hover:bg-slate-100 rounded-full transition-colors">
             <ChevronLeft size={20} className="text-slate-500" />
           </Link>
           <h1 className="text-xl font-bold text-slate-800">Dispatch Panel</h1>
+          <button className="md:hidden ml-auto p-2 hover:bg-slate-100 rounded-full" onClick={() => setSidebarOpen(false)}>
+            <X size={20} className="text-slate-500" />
+          </button>
         </div>
         
         <div className="p-6 flex-1 overflow-y-auto">
@@ -273,6 +295,12 @@ export default function AdminDashboard() {
 
       {/* Main Map Area */}
       <div className="flex-1 relative">
+        <button 
+          onClick={() => setSidebarOpen(true)}
+          className="md:hidden absolute top-4 left-4 z-[1000] bg-white p-2 rounded-lg shadow-md border border-slate-200"
+        >
+          <Menu size={24} className="text-slate-700" />
+        </button>
         
         {loading && (
           <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-[2000] flex items-center justify-center">
@@ -313,17 +341,6 @@ export default function AdminDashboard() {
               />
             </LayersControl.BaseLayer>
           </LayersControl>
-
-          {/* Render History Paths */}
-          {Object.values(driversHistory).map((pts, i) => (
-            <SnappedPolyline 
-              key={`hist-${i}`} 
-              pts={pts}
-              color="#cbd5e1" 
-              weight={2} 
-              opacity={0.5} 
-            />
-          ))}
 
           {/* Render Today Paths */}
           {Object.keys(driversToday).map((driverId, idx) => {

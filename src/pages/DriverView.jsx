@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, LayersControl } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { logPoints, generateUUID } from '../api';
+import { logPoints, generateUUID, fetchPoints } from '../api';
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { App } from '@capacitor/app';
 
 const BackgroundGeolocation = registerPlugin('BackgroundGeolocation');
 
@@ -47,11 +48,21 @@ export default function DriverView() {
     return localStorage.getItem('deliveryDriverName') || '';
   });
   
+  const [driverEmail, setDriverEmail] = useState(() => {
+    return localStorage.getItem('deliveryDriverEmail') || '';
+  });
+  
   const [isTracking, setIsTracking] = useState(false);
 
   const [position, setPosition] = useState(null);
-  const [path, setPath] = useState([]);
-  const [syncQueue, setSyncQueue] = useState([]);
+  const [path, setPath] = useState(() => {
+    const saved = localStorage.getItem('driverPath');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [syncQueue, setSyncQueue] = useState(() => {
+    const saved = localStorage.getItem('syncQueue');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [status, setStatus] = useState('Initializing...');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const isSyncing = useRef(false);
@@ -61,11 +72,36 @@ export default function DriverView() {
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    
+    const loadTodayPath = async () => {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const allPoints = await fetchPoints(today);
+        const myPoints = allPoints.filter(p => p.driver === driverId);
+        if (myPoints.length > 0) {
+          const fetchedPath = myPoints.map(p => [parseFloat(p.lat), parseFloat(p.lng)]);
+          setPath(fetchedPath);
+          setPosition({ lat: fetchedPath[fetchedPath.length-1][0], lng: fetchedPath[fetchedPath.length-1][1] });
+        }
+      } catch (e) {
+        console.error("Failed to fetch path", e);
+      }
+    };
+    if (isOnline && driverId) loadTodayPath();
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [driverId, isOnline]);
+
+  useEffect(() => {
+    localStorage.setItem('driverPath', JSON.stringify(path));
+  }, [path]);
+
+  useEffect(() => {
+    localStorage.setItem('syncQueue', JSON.stringify(syncQueue));
+  }, [syncQueue]);
 
   // Geolocation watcher
   useEffect(() => {
@@ -98,7 +134,7 @@ export default function DriverView() {
       setSyncQueue(prev => [...prev, {
         ...newPos,
         driver: driverId,
-        email: 'driver@example.com',
+        email: driverEmail,
         name: driverName
       }]);
     };
@@ -165,7 +201,7 @@ export default function DriverView() {
     return () => clearInterval(interval);
   }, [syncQueue, isOnline]);
 
-  // Expose manual sync function for Clock Out
+  // Expose manual sync function for Clock Out and Background transitions
   const forceSync = async () => {
     if (syncQueue.length === 0 || !isOnline) return;
     setStatus(`Syncing (${syncQueue.length} pending)...`);
@@ -179,28 +215,57 @@ export default function DriverView() {
     }
   };
 
-  if (!driverName) {
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    
+    let sub = null;
+    App.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) {
+        forceSync();
+      }
+    }).then(s => sub = s);
+    
+    return () => {
+      if (sub && sub.remove) sub.remove();
+    };
+  }, [syncQueue, isOnline]);
+
+  if (!driverName || !driverEmail) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 p-4">
         <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full text-center">
           <h2 className="text-2xl font-bold text-slate-800 mb-2">Welcome App User</h2>
-          <p className="text-slate-500 mb-6 text-sm">Please enter your full name to start tracking.</p>
+          <p className="text-slate-500 mb-6 text-sm">Please enter your details to start tracking.</p>
+          
           <input 
             type="text" 
             id="nameInput"
-            placeholder="e.g. John Doe" 
+            placeholder="Full Name (e.g. John Doe)" 
+            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none mb-3 text-slate-700"
+          />
+          
+          <input 
+            type="email" 
+            id="emailInput"
+            placeholder="Email Address" 
             className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none mb-4 text-slate-700"
             onKeyDown={(e) => {
               if (e.key === 'Enter') document.getElementById('startBtn').click();
             }}
           />
+          
           <button 
             id="startBtn"
             onClick={() => {
               const name = document.getElementById('nameInput').value.trim();
-              if (name) {
+              const email = document.getElementById('emailInput').value.trim();
+              if (name && email) {
                 localStorage.setItem('deliveryDriverName', name);
+                localStorage.setItem('deliveryDriverEmail', email);
                 setDriverName(name);
+                setDriverEmail(email);
+              } else {
+                alert("Please enter both Name and Email.");
               }
             }}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors"
