@@ -34,6 +34,20 @@ const LocationTracker = ({ position }) => {
   return null;
 };
 
+// Calculate distance in meters between two coordinates
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // metres
+  const φ1 = lat1 * Math.PI/180;
+  const φ2 = lat2 * Math.PI/180;
+  const Δφ = (lat2-lat1) * Math.PI/180;
+  const Δλ = (lon2-lon1) * Math.PI/180;
+  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ/2) * Math.sin(Δλ/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c; // in metres
+}
+
 export default function DriverView() {
   const [driverId] = useState(() => {
     let id = localStorage.getItem('deliveryDriverId');
@@ -66,6 +80,13 @@ export default function DriverView() {
   const [status, setStatus] = useState('Initializing...');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const isSyncing = useRef(false);
+  const lastLoggedPos = useRef(null);
+
+  useEffect(() => {
+    if (path.length > 0 && !lastLoggedPos.current) {
+      lastLoggedPos.current = { lat: path[path.length-1][0], lng: path[path.length-1][1] };
+    }
+  }, [path]);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -82,6 +103,7 @@ export default function DriverView() {
           const fetchedPath = myPoints.map(p => [parseFloat(p.lat), parseFloat(p.lng)]);
           setPath(fetchedPath);
           setPosition({ lat: fetchedPath[fetchedPath.length-1][0], lng: fetchedPath[fetchedPath.length-1][1] });
+          lastLoggedPos.current = { lat: fetchedPath[fetchedPath.length-1][0], lng: fetchedPath[fetchedPath.length-1][1] };
         }
       } catch (e) {
         console.error("Failed to fetch path", e);
@@ -126,7 +148,14 @@ export default function DriverView() {
       const longitude = pos.coords ? pos.coords.longitude : pos.longitude;
       const timestamp = pos.timestamp || pos.time || Date.now();
       
+      // Enforce 50-meter distance filter
+      if (lastLoggedPos.current) {
+        const dist = getDistance(lastLoggedPos.current.lat, lastLoggedPos.current.lng, latitude, longitude);
+        if (dist < 50) return; // Skip point if it's less than 50 meters from the last one
+      }
+      
       const newPos = { lat: latitude, lng: longitude, timestamp };
+      lastLoggedPos.current = newPos;
       
       setPosition(newPos);
       setPath(prev => [...prev, [latitude, longitude]]);
@@ -146,7 +175,7 @@ export default function DriverView() {
         backgroundTitle: "Delivery Tracker is Active",
         requestPermissions: true,
         stale: false,
-        distanceFilter: 10 // Update every 10 meters
+        distanceFilter: 50 // Update every 50 meters natively
       }, handleLocation).then(id => {
         capacitorWatcherId = id;
       }).catch(err => {
@@ -194,7 +223,12 @@ export default function DriverView() {
       }
     };
 
-    // Sync interval: 4 minutes as requested (240000 ms)
+    // Auto-sync when 50 points are collected
+    if (syncQueue.length >= 50) {
+      syncData();
+    }
+
+    // Sync interval: 4 minutes as a backup
     const interval = setInterval(() => {
       if (syncQueue.length > 0) syncData();
     }, 240000);
