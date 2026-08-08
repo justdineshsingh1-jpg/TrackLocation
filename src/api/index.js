@@ -1,7 +1,7 @@
 // API client for interacting with Google Apps Script Backend
 
 // IMPORTANT: Replace this with your actual Google Apps Script Web App URL after deploying Code.gs
-export const API_URL = import.meta.env.VITE_APPS_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbwNKxu4MFKMAYYk-C8JME41rS80M3h6GXbXoq_Qh84GJ0g52rWRriNkaYxuYmDH_PRQ/exec";
+export const API_URL = import.meta.env.VITE_APPS_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbzRjZI6bLZGwNRUJGepgEcmPQJY8R6vA_kYUvfR4mOBi7RZCvZ5Bcx9x-GNTZxQpefe/exec";
 
 export const fetchPoints = async (date = null) => {
   let url = `${API_URL}?action=getPoints`;
